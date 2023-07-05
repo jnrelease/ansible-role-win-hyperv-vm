@@ -1,0 +1,6 @@
+---
+- name: Manage VMs
+  include_tasks: '{{ item.state }}.yml'
+  loop: '{{ vms }}'
+  loop_control:
+    label: '{{ item.name }}'

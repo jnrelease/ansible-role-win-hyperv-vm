@@ -1,0 +1,15 @@
+---
+- name: Stop VM
+  win_hyperv_vm:
+    name: '{{ item.name }}'
+    state: stopped
+
+- name: Remove VM
+  win_hyperv_vm:
+    name: '{{ item.name }}'
+    state: absent
+
+- name: Remove VM path
+  win_file:
+    path: '{{ item.path }}'
+    state: absent

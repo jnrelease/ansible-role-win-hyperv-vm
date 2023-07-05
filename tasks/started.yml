@@ -1,0 +1,80 @@
+---
+- name: Ensure VM path exists
+  win_file:
+    path: '{{ item.path }}'
+    state: directory
+
+- name: Ensure VHDX path exists
+  win_file:
+    path: '{{ item.dest_vhd }}'
+    state: directory
+
+- name: Check whether VHDX file already exists
+  win_find:
+    paths: '{{ item.dest_vhd }}'
+    get_checksum: false
+    patterns: ['*.vhdx']
+  register: file_info
+
+- name: Download base image for VM
+  win_copy:
+    src: '{{ item.src_vhd }}'
+    dest: '{{ item.dest_vhd }}'
+    remote_src: true
+  when:
+    - file_info.files | length < 1
+
+- name: Create VM
+  win_hyperv_vm:
+    name: '{{ item.name }}'
+    vmpath: '{{ item.path }}'
+    baseimage: '{{ item.src_vhd | win_basename }}'
+    boot_disk_size: "{{ item.boot_disk_size | default('500 GB') | human_to_bytes }}"
+    cpu: '{{ item.cpu | default(2) }}'
+    memory: "{{ item.memory |  default('4 GB') | human_to_bytes }}"
+    generation: '{{ item.generation | default(2) }}'
+    secondary_disks: '{{ item.secondary_disks | default(omit) }}'
+    network_switch: '{{ item.network.switch }}'
+    state: 'present'
+
+- name: Add IP address to VM
+  win_hyperv_network:
+    name: '{{ item.name }}'
+    ip: '{{ item.network.ip }}'
+    netmask: '{{ item.network.netmask }}'
+    gateway: '{{ item.network.gateway }}'
+    dns: '{{ item.network.dns }}'
+    type: 'static'
+
+- name: Start VM
+  win_hyperv_vm:
+    name: '{{ item.name }}'
+    state: started
+
+- name: Ensure WinRM powershell script exists on Hyper-V host
+  win_copy:
+    src: winrm.ps1
+    dest: C:\temp\ConfigureRemotingForAnsible.ps1
+
+- name: Wait for RDP port
+  win_wait_for:
+    port: 3389
+    host: '{{ item.network.ip }}'
+
+- name: Wait for WinRM port
+  win_wait_for:
+    port: 5986
+    host: '{{ item.network.ip }}'
+    delay: 0
+    timeout: 3
+  ignore_errors: true
+  register: winrm
+
+- name: Install WinRM
+  win_shell: |
+    $user = "{{ admin_user }}"
+    $pass = ConvertTo-SecureString -String "{{ admin_password }}" -AsPlainText -Force
+    $cred = New-Object System.Management.Automation.PSCredential ($user, $pass)
+    Invoke-Command -VMName "{{ item.name }}" -Credential $cred -FilePath C:\temp\ConfigureRemotingForAnsible.ps1
+  when:
+    - winrm.failed == true
